@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>Notifikasi Suara Jam</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg:#0f172a; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; --accent:#22c55e; --danger:#ef4444; --border:#1f2937;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+      background: var(--bg); color: var(--text);
+      display:flex; min-height:100vh; align-items:center; justify-content:center; padding:24px;
+    }
+    .wrap { width:100%; max-width: 780px; }
+    .card {
+      background: var(--card); border:1px solid var(--border); border-radius:16px; padding:20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    }
+    h1 { margin:0 0 12px; font-size: 1.25rem; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .row { display:flex; gap:8px; align-items:center; }
+    label { font-size:.9rem; color: var(--muted); }
+    select, input[type="checkbox"], input[type="radio"] {
+      accent-color: var(--accent);
+    }
+    select {
+      width:100%; padding:10px; border-radius:10px; border:1px solid var(--border);
+      background:#0b1220; color:var(--text);
+    }
+    .section { margin-top:14px; padding-top:14px; border-top:1px dashed var(--border); }
+    .btns { display:flex; gap:10px; margin-top:12px; }
+    button {
+      padding:10px 14px; border:1px solid var(--border); border-radius:10px; cursor:pointer;
+      background:#0b1220; color: var(--text);
+    }
+    button.primary { background: var(--accent); color:#062b17; border: none; font-weight:600; }
+    button.stop { background: var(--danger); color:#2e0a0a; border:none; font-weight:600; }
+    .status { margin-top:10px; font-size:.9rem; color: var(--muted); }
+    .inline { display:flex; gap:18px; align-items:center; flex-wrap: wrap; }
+    .kiosk { margin-top:6px; font-size: .95rem; color: var(--text); }
+    .footer {
+      margin-top:16px; padding-top:12px; border-top:1px dashed var(--border);
+      text-align:center; color: var(--muted); font-size:.9rem;
+    }
+    .badge { display:inline-block; padding:4px 8px; border:1px solid var(--border); border-radius:999px; font-size:.8rem; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Notifikasi Suara Jam</h1>
+
+      <div class="grid">
+        <div>
+          <label>Bahasa suara</label>
+          <select id="language">
+            <option value="id">Bahasa Indonesia</option>
+            <option value="jv">Bahasa Jawa</option>
+            <option value="su">Bahasa Sunda</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+        <div>
+          <label>Interval pengumuman</label>
+          <select id="interval">
+            <option value="15">Setiap 15 menit</option>
+            <option value="30">Setiap 30 menit</option>
+            <option value="60">Setiap 1 jam</option>
+            <option value="120">Setiap 2 jam</option>
+            <option value="180">Setiap 3 jam</option>
+            <option value="240">Setiap 4 jam</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="inline">
+          <div class="row">
+            <input type="radio" name="timefmt" id="fmt24" value="24" checked />
+            <label for="fmt24">Format 24 jam</label>
+          </div>
+          <div class="row">
+            <input type="radio" name="timefmt" id="fmt12" value="12" />
+            <label for="fmt12">Format 12 jam (AM/PM)</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="includeDate" checked />
+            <label for="includeDate">Sertakan hari, tanggal, bulan, tahun</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="btns">
+          <button class="primary" id="startBtn">Mulai</button>
+          <button class="stop" id="stopBtn" disabled>Berhenti</button>
+          <button id="testBtn">Uji Sekarang</button>
+        </div>
+        <div class="status">
+          <span class="badge" id="runStatus">Status: standby</span>
+          <div class="kiosk">
+            <div>Suara: <span id="voiceInfo" class="mono">mencari voice…</span></div>
+            <div>Jadwal berikutnya: <span id="nextTick" class="mono">—</span></div>
+            <div>Terakhir umumkan: <span id="lastAnn" class="mono">—</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer">
+        Dibuat oleh rasarab dengan [❤️]
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ======== Setup voices & UI ========
+    const langMap = {
+      id: { code: "id-ID", label: "Bahasa Indonesia" },
+      en: { code: "en-US", label: "English" },
+      jv: { code: "jv-ID", label: "Bahasa Jawa" }, // catatan: tidak semua browser punya voice ini
+      su: { code: "su-ID", label: "Bahasa Sunda" } // catatan: tidak semua browser punya voice ini
+    };
+
+    let voices = [];
+    let running = false;
+    let timer = null;
+    let lastSpokenMinute = null; // minutes since midnight when last spoken
+    let lastSpokenStamp = null;
+
+    const $ = (id) => document.getElementById(id);
+    const languageSel = $("language");
+    const intervalSel = $("interval");
+    const fmt24 = $("fmt24");
+    const fmt12 = $("fmt12");
+    const includeDate = $("includeDate");
+    const startBtn = $("startBtn");
+    const stopBtn = $("stopBtn");
+    const testBtn = $("testBtn");
+    const runStatus = $("runStatus");
+    const voiceInfo = $("voiceInfo");
+    const nextTick = $("nextTick");
+    const lastAnn = $("lastAnn");
+
+    function loadVoices() {
+      voices = window.speechSynthesis.getVoices();
+      updateVoiceInfo();
+    }
+
+    function updateVoiceInfo() {
+      const lang = languageSel.value;
+      const targetCode = langMap[lang].code;
+      const match = voices.find(v => (v.lang || "").toLowerCase() === targetCode.toLowerCase());
+      if (match) {
+        voiceInfo.textContent = `${match.name} (${match.lang})`;
+      } else {
+        // fallback: show any default
+        const def = voices[0];
+        voiceInfo.textContent = def ? `${def.name} (${def.lang}) — fallback` : "voice tidak ditemukan, browser akan memakai default";
+      }
+    }
+
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    loadVoices();
+
+    // ======== Time helpers & scheduling ========
+    function minutesSinceMidnight(d = new Date()) {
+      return d.getHours() * 60 + d.getMinutes();
+    }
+
+    function nextBoundary(intervalMin) {
+      const now = new Date();
+      const ms = now.getTime();
+      const min = minutesSinceMidnight(now);
+      const remainder = min % intervalMin;
+      const toNext = remainder === 0 ? (intervalMin) : (intervalMin - remainder);
+      const next = new Date(ms + toNext * 60 * 1000);
+      next.setSeconds(0, 0);
+      return next;
+    }
+
+    function formatClock(d, use12, langKey) {
+      let h = d.getHours();
+      let m = d.getMinutes().toString().padStart(2, "0");
+      if (use12) {
+        const ampm = h >= 12 ? (langKey === "en" ? "PM" : "PM") : (langKey === "en" ? "AM" : "AM");
+        let hh = h % 12; if (hh === 0) hh = 12;
+        return { time: `${hh}:${m}`, ampm };
+      }
+      return { time: `${h.toString().padStart(2,"0")}:${m}`, ampm: "" };
+    }
+
+    const dayNames = {
+      id: ["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"],
+      en: ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"],
+      jv: ["Ahad","Senèn","Selasa","Rebo","Kemis","Jumuah","Setu"],
+      su: ["Minggu","Senén","Salasa","Rebo","Kemis","Jumaah","Saptu"]
+    };
+    const monthNames = {
+      id: ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"],
+      en: ["January","February","March","April","May","June","July","August","September","October","November","December"],
+      jv: ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"],
+      su: ["Januari","Pébruari","Maret","April","Mei","Juni","Juli","Agustus","Séptémber","Oktober","Nopémber","Désémber"]
+    };
+
+    function buildAnnouncement(d) {
+      const lang = languageSel.value;
+      const use12 = fmt12.checked;
+      const incDate = includeDate.checked;
+      const { time, ampm } = formatClock(d, use12, lang);
+
+      let phrase = "";
+      if (lang === "id") {
+        phrase = `Sekarang pukul ${time}` + (use12 ? ` ${ampm}` : "");
+        if (incDate) {
+          const hari = dayNames.id[d.getDay()];
+          const tgl = d.getDate();
+          const bln = monthNames.id[d.getMonth()];
+          const thn = d.getFullYear();
+          phrase += `. ${hari}, ${tgl} ${bln} ${thn}.`;
+        }
+      } else if (lang === "en") {
+        phrase = `The time is ${time}` + (use12 ? ` ${ampm}` : "");
+        if (incDate) {
+          const day = dayNames.en[d.getDay()];
+          const date = d.getDate();
+          const mon = monthNames.en[d.getMonth()];
+          const yr = d.getFullYear();
+          phrase += `. ${day}, ${mon} ${date}, ${yr}.`;
+        }
+      } else if (lang === "jv") {
+        // Sederhana dan jelas
+        phrase = `Saiki jam ${time}` + (use12 ? ` ${ampm}` : "");
+        if (incDate) {
+          const dina = dayNames.jv[d.getDay()];
+          const tgl = d.getDate();
+          const sasi = monthNames.jv[d.getMonth()];
+          const taun = d.getFullYear();
+          phrase += `. ${dina}, ${tgl} ${sasi} ${taun}.`;
+        }
+      } else if (lang === "su") {
+        phrase = `Ayeuna jam ${time}` + (use12 ? ` ${ampm}` : "");
+        if (incDate) {
+          const dinten = dayNames.su[d.getDay()];
+          const tgl = d.getDate();
+          const sasih = monthNames.su[d.getMonth()];
+          const taun = d.getFullYear();
+          phrase += `. ${dinten}, ${tgl} ${sasih} ${taun}.`;
+        }
+      }
+      return phrase;
+    }
+
+    function speak(text) {
+      const lang = languageSel.value;
+      const targetCode = langMap[lang].code;
+      const utter = new SpeechSynthesisUtterance(text);
+      // pilih voice yang paling cocok
+      const match = voices.find(v => (v.lang || "").toLowerCase() === targetCode.toLowerCase());
+      if (match) utter.voice = match;
+      utter.lang = match ? match.lang : targetCode; // set lang agar pelafalan lebih tepat jika didukung
+      utter.rate = 1.0;
+      utter.pitch = 1.0;
+      window.speechSynthesis.cancel(); // pastikan tidak menumpuk
+      window.speechSynthesis.speak(utter);
+    }
+
+    function updateNextTickLabel() {
+      const intervalMin = parseInt(intervalSel.value, 10);
+      const next = nextBoundary(intervalMin);
+      nextTick.textContent = next.toLocaleString();
+    }
+
+    function loop() {
+      if (!running) return;
+      const now = new Date();
+      const intervalMin = parseInt(intervalSel.value, 10);
+      const mins = minutesSinceMidnight(now);
+
+      // speak tepat di menit kelipatan interval, pada detik 0
+      if (mins % intervalMin === 0 && now.getSeconds() === 0) {
+        if (lastSpokenMinute !== mins) {
+          const phrase = buildAnnouncement(now);
+          speak(phrase);
+          lastSpokenMinute = mins;
+          lastSpokenStamp = now.toLocaleString();
+          lastAnn.textContent = lastSpokenStamp;
+          updateNextTickLabel();
+        }
+      }
+    }
+
+    function start() {
+      if (running) return;
+      running = true;
+      runStatus.textContent = "Status: berjalan";
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      updateVoiceInfo();
+      updateNextTickLabel();
+      // sinkronisasi awal ke detik berikutnya
+      const now = new Date();
+      const delay = 1000 - (now.getMilliseconds());
+      setTimeout(() => {
+        loop(); // cek segera
+        timer = setInterval(loop, 1000);
+      }, delay);
+    }
+
+    function stop() {
+      running = false;
+      if (timer) clearInterval(timer);
+      timer = null;
+      runStatus.textContent = "Status: berhenti";
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+
+    // ======== Events ========
+    languageSel.addEventListener("change", () => {
+      updateVoiceInfo();
+    });
+    intervalSel.addEventListener("change", updateNextTickLabel);
+    fmt12.addEventListener("change", () => {});
+    fmt24.addEventListener("change", () => {});
+    includeDate.addEventListener("change", () => {});
+    startBtn.addEventListener("click", start);
+    stopBtn.addEventListener("click", stop);
+    testBtn.addEventListener("click", () => {
+      const now = new Date();
+      const phrase = buildAnnouncement(now);
+      speak(phrase);
+      lastSpokenStamp = now.toLocaleString();
+      lastAnn.textContent = lastSpokenStamp + " (uji)";
+    });
+
+    // Inisialisasi tampilan
+    updateNextTickLabel();
+    runStatus.textContent = "Status: standby";
+  </script>
+</body>
+</html>
